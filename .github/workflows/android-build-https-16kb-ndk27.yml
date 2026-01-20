@@ -59,6 +59,16 @@ jobs:
           
           echo "16KB page size patches applied"
       
+      - name: patch for ndk r27 compiler warnings
+        run: |
+          # NDK r27c has stricter Clang that errors on 1-bit signed bitfield assignments
+          # Add -Wno-single-bit-bitfield-constant-conversion to suppress this warning
+          if [ -f "android/jni/Android.mk" ]; then
+            sed -i 's/MY_CFLAGS := -Wall -Werror -Wno-unused-parameter -Wno-switch -Wno-sign-compare/MY_CFLAGS := -Wall -Werror -Wno-unused-parameter -Wno-switch -Wno-sign-compare -Wno-single-bit-bitfield-constant-conversion/g' android/jni/Android.mk
+            echo "Patched android/jni/Android.mk for NDK r27c compatibility"
+            grep -n "MY_CFLAGS" android/jni/Android.mk || true
+          fi
+      
       - name: run the build script
         run: |
           ./android.sh -d \
