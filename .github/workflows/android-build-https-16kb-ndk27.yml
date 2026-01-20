@@ -62,8 +62,7 @@ jobs:
       - name: run the build script
         run: |
           ./android.sh -d \
-            --enable-gnutls \
-            --enable-gmp \
+            --enable-openssl \
             --api-level=24 \
             --disable-x86 \
             --disable-arm-v7a
@@ -119,7 +118,7 @@ jobs:
             FFmpeg-Kit HTTPS build with 16KB page size support for Android 15+
             
             - NDK: r27c
-            - Package: https (gnutls + gmp)
+            - Package: https (openssl)
             - LTS: No
             - 16KB page aligned: Yes (64-bit only)
             - Architectures: arm64-v8a, arm-v7a-neon, x86_64
