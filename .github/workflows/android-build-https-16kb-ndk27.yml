@@ -1,0 +1,135 @@
+name: android https 16kb ndk27
+
+# Build FFmpeg-Kit HTTPS package with 16KB page size support for Android 15+
+# Uses NDK r27c which includes native 16KB page size support
+# Target: arm64-v8a, arm-v7a-neon, x86_64 (16KB only affects 64-bit builds)
+# Min API: 24 (Android 7.0)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/android-build-https-16kb-ndk27.yml'
+
+jobs:
+  build-https-16kb-on-linux:
+    name: android https 16kb ndk27 on linux
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: set up adopt jdk 17
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'adopt'
+          java-version: '17'
+      
+      - name: prerequisites
+        run: ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --uninstall "cmake;3.10.2.4988404" "cmake;3.18.1"
+      
+      - name: set up android ndk r27c
+        run: |
+          curl -s "https://dl.google.com/android/repository/android-ndk-r27c-linux.zip" -o ndk.zip
+          unzip -q -o ndk.zip -d .ndk
+          echo "ANDROID_NDK_ROOT=$PWD/.ndk/$(ls .ndk)" >> $GITHUB_ENV
+      
+      - name: patch for 16kb page size support
+        run: |
+          # NDK r27+ supports 16KB page sizes via max-page-size linker flag
+          # Patch all LDFLAGS locations in function-android.sh
+          if [ -f "scripts/function-android.sh" ]; then
+            # Add 16KB page alignment flag - catches both APP_LDFLAGS and get_ldflags()
+            sed -i 's/-Wl,--hash-style=both/-Wl,--hash-style=both -Wl,-z,max-page-size=16384/g' scripts/function-android.sh
+            
+            # Also patch any existing max-page-size=4096 to 16384 (future-proofing)
+            sed -i 's/max-page-size=4096/max-page-size=16384/g' scripts/function-android.sh
+            
+            echo "Patched scripts/function-android.sh for 16KB page alignment"
+            grep -n "page-size\|LDFLAGS" scripts/function-android.sh | head -20 || true
+          fi
+          
+          # Also check android.sh for any page-size settings
+          if [ -f "android.sh" ]; then
+            sed -i 's/max-page-size=4096/max-page-size=16384/g' android.sh
+          fi
+          
+          echo "16KB page size patches applied"
+      
+      - name: run the build script
+        run: |
+          ./android.sh -d \
+            --enable-gnutls \
+            --enable-gmp \
+            --api-level=24 \
+            --disable-x86 \
+            --disable-arm-v7a
+      
+      - name: print build logs
+        if: ${{ always() }}
+        run: cat build.log
+      
+      - name: print ffbuild logs
+        if: ${{ failure() }}
+        run: '[[ -f ./src/ffmpeg/ffbuild/config.log ]] && tail -50 ./src/ffmpeg/ffbuild/config.log'
+      
+      - name: verify 16kb alignment
+        if: success()
+        run: |
+          echo "=== Checking 16KB ELF alignment ==="
+          find prebuilt -name "*.so" -type f 2>/dev/null | head -5 | while read so; do
+            echo "Checking: $so"
+            $ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf -l "$so" 2>/dev/null | grep -E "LOAD|align" || echo "Could not check alignment"
+          done
+      
+      - name: find and prepare aar
+        run: |
+          echo "=== Looking for AAR files ==="
+          find prebuilt -name "*.aar" -type f 2>/dev/null || echo "No AAR files found in prebuilt"
+          
+          # Copy AAR to workspace root for easy upload
+          mkdir -p ./artifacts
+          find prebuilt -name "*.aar" -exec cp {} ./artifacts/ \; 2>/dev/null || true
+          
+          # Rename for clarity
+          cd ./artifacts
+          for f in *.aar; do
+            [ -f "$f" ] && mv "$f" "ffmpeg-kit-https-16kb-ndk27.aar" 2>/dev/null || true
+            break
+          done
+          ls -la
+      
+      - name: upload aar artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-kit-https-16kb-ndk27
+          path: ./artifacts/*.aar
+          retention-days: 90
+          if-no-files-found: warn
+      
+      - name: create github release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v6.0-https-16kb-ndk27
+          name: "FFmpeg-Kit HTTPS 16KB (NDK r27)"
+          body: |
+            FFmpeg-Kit HTTPS build with 16KB page size support for Android 15+
+            
+            - NDK: r27c
+            - Package: https (gnutls + gmp)
+            - LTS: No
+            - 16KB page aligned: Yes (64-bit only)
+            - Architectures: arm64-v8a, arm-v7a-neon, x86_64
+            - Min API: 24 (Android 7.0)
+            
+            Note: 16KB page alignment only applies to 64-bit builds (arm64-v8a, x86_64).
+            32-bit arm-v7a-neon is included for legacy device compatibility.
+          files: ./artifacts/*.aar
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
