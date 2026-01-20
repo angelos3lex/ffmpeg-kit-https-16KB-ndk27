@@ -7,11 +7,6 @@ name: android https 16kb ndk27
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - '.github/workflows/android-build-https-16kb-ndk27.yml'
 
 jobs:
   build-https-16kb-on-linux:
