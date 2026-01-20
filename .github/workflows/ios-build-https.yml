@@ -1,0 +1,94 @@
+name: ios https
+
+# Build FFmpeg-Kit HTTPS package for iOS
+# Uses Xcode 16.0 on macOS Sonoma
+# Package: https (gnutls + gmp)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-https-on-macos:
+    name: ios https on sonoma
+    runs-on: macos-14
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: prerequisites
+        run: brew install autoconf automake libtool pkg-config curl git cmake nasm gperf texinfo
+      
+      - name: set up xcode
+        run: echo "export DEVELOPER_DIR=/Applications/Xcode_16.0.app/Contents/Developer" > ~/.xcode.for.ffmpeg.kit.sh
+      
+      - name: run the build script
+        run: |
+          ./ios.sh --xcframework \
+            --enable-gnutls \
+            --enable-gmp \
+            --enable-ios-audiotoolbox \
+            --enable-ios-avfoundation \
+            --enable-ios-videotoolbox \
+            --enable-ios-zlib
+      
+      - name: print build logs
+        if: ${{ always() }}
+        run: cat build.log
+      
+      - name: print ffbuild logs
+        if: ${{ failure() }}
+        run: '[[ -f ./src/ffmpeg/ffbuild/config.log ]] && tail -50 ./src/ffmpeg/ffbuild/config.log'
+      
+      - name: find and prepare xcframework
+        run: |
+          echo "=== Looking for xcframework files ==="
+          find prebuilt -name "*.xcframework" -type d 2>/dev/null || echo "No xcframework found in prebuilt"
+          
+          # Create artifacts directory
+          mkdir -p ./artifacts
+          
+          # Zip the xcframework for upload
+          if [ -d "prebuilt/bundle-apple-xcframework-ios" ]; then
+            cd prebuilt/bundle-apple-xcframework-ios
+            zip -r ../../artifacts/ffmpeg-kit-ios-https.xcframework.zip *.xcframework
+            cd ../..
+          fi
+          
+          ls -la ./artifacts/
+      
+      - name: upload xcframework artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-kit-ios-https
+          path: ./artifacts/*.zip
+          retention-days: 90
+          if-no-files-found: warn
+      
+      - name: create github release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v6.0-ios-https
+          name: "FFmpeg-Kit iOS HTTPS"
+          body: |
+            FFmpeg-Kit HTTPS build for iOS
+            
+            - Xcode: 16.0
+            - Package: https (gnutls + gmp)
+            - LTS: No
+            - Format: XCFramework
+            - Architectures: arm64, x86_64 (simulator)
+            
+            Includes:
+            - gnutls (TLS/SSL)
+            - gmp (crypto)
+            - AudioToolbox
+            - AVFoundation
+            - VideoToolbox
+            - zlib
+          files: ./artifacts/*.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
